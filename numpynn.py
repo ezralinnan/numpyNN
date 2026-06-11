@@ -44,8 +44,8 @@ class AntonMNIST:
         rng1 = np.random.default_rng(5)
         self.w1 = rng1.standard_normal((hidden_units, input_units)) * np.sqrt(2 / input_units)
         self.b1 = np.zeros((hidden_units, 1))
-        self.w2 = rng1.standard_normal((1, hidden_units)) * np.sqrt(2 / hidden_units)
-        self.b2 = np.zeros((1, 1))
+        self.w2 = rng1.standard_normal((10, hidden_units)) * np.sqrt(2 / hidden_units)
+        self.b2 = np.zeros((10, 1))
 
         # store activations for backpropogation and gradients for update
         self.activations = {}
@@ -67,12 +67,19 @@ class AntonMNIST:
         assert (relu_grad == (inputs >= 0).astype(float)).all()
         return relu_grad
 
+    # softmax function
+    @staticmethod
+    def softmax(z):
+        z_shifted = z - np.max(z, axis=0, keepdims=True)
+        exp_z = np.exp(z_shifted)
+        return exp_z / np.sum(exp_z, axis=0, keepdims=True)
+
     # forward pass 2x takes input matrix, multiplies weights and add biases, then applies activation function
     def forward(self, inputs):
         z1 = np.dot(self.w1, inputs) + self.b1
         a1 = self.relu(z1)
         z2 = np.dot(self.w2, a1) + self.b2
-        a2 = 1 / (1 + np.exp(-z2))
+        a2 = self.softmax(z2)
 
         # saves intermediate values for backpropogation
         self.activations["a0"] = inputs
@@ -83,19 +90,22 @@ class AntonMNIST:
 
         return a2
 
-    # binary cross-entropy loss function
+    # cross-entropy loss function
     @staticmethod
-    def calculate_loss(logits, labels1):
+    def calculate_loss(probs, labels1):
         m = labels1.shape[0]
-        logits = np.clip(logits, 1e-7, 1 - 1e-7)
-        losses = -(np.multiply(labels1, np.log(logits)) + np.multiply((1 - labels1), np.log(1 - logits)))
-        total_loss = np.sum(losses / m)
-        return total_loss
+        probs = np.clip(probs, 1e-12, 1.0)
+        correct_class_probs = probs[labels1, np.arange(m)]
+        loss = -np.mean(np.log(correct_class_probs))
+        return loss
 
     # backpropogation = how much each parameter contributed to the loss via gradients
     def calculate_gradients(self, labels2):
         m = labels2.shape[0]
-        dz2 = self.activations["a2"] - labels2
+
+        y_one_hot = one_hot(labels2, num_classes=10)
+
+        dz2 = self.activations["a2"] - y_one_hot
         dw2 = 1 / m * np.dot(dz2, self.activations["a1"].T)
         db2 = 1 / m * np.sum(dz2, axis=1, keepdims=True)
         dz1 = np.multiply(self.w2.T @ dz2, self.relu_derivative(self.activations["z1"]))
@@ -138,18 +148,20 @@ def get_batches(batch_size1, x, y):
 
 
 # calculate the accuracy of logits (predictions) vs. labels=y_hat (actual)
-def accuracy(logits, y_hat):
-    predicted_labels = (logits > 0.5).astype(float)
-    num_examples = y_hat.shape[0]
-    correct_predictions = (predicted_labels == y_hat).sum().item()
-    return correct_predictions / num_examples
+def accuracy(probs, y_hat):
+    predicted_labels = np.argmax(probs, axis=0)
+    return np.mean(predicted_labels == y_hat)
 
+def one_hot(labels2, num_classes=10):
+    output = np.zeros((num_classes, labels2.shape[0]))
+    output[labels2, np.arange(labels2.shape[0])] = 1
+    return output
 
 if __name__ == "__main__":
     # load in train, dev, and test datasets
-    x_train, y_train = read_images("data/binary_mnist/train/")
-    x_dev, y_dev = read_images("data/binary_mnist/dev/")
-    x_test, y_test = read_images("data/binary_mnist/test/")
+    x_train, y_train = read_images("data/fashion_mnist/train/")
+    x_dev, y_dev = read_images("data/fashion_mnist/dev/")
+    x_test, y_test = read_images("data/fashion_mnist/test/")
 
     # compute the dataset statistics
     dataset_mean, dataset_std = x_train.mean(), x_train.std()
@@ -180,21 +192,14 @@ if __name__ == "__main__":
     # plotting
     import matplotlib.pyplot as plt
 
-    plt.figure(figsize=(8, 5))
-
     train_loss_history = []
     dev_loss_history = []
-
+    x_axis = []
 
     num_epochs = 10
+
     for epoch in range(num_epochs):
         for batch_idx, (features, labels) in enumerate(batches):
-            if np.any(np.isnan(features)):
-                print(f"NaN detected in features at batch {batch_idx}")
-                break
-            if np.any(np.isnan(labels)):
-                print(f"NaN detected in labels at batch {batch_idx}")
-                break
 
             # forward pass
             output_logits = model.forward(features)
@@ -204,36 +209,34 @@ if __name__ == "__main__":
             model.calculate_gradients(labels)
             model.update_parameters(learning_rate)
 
-            dev_logits = model.forward(x_dev_scaled)
-            dev_loss = model.calculate_loss(dev_logits, y_dev)
-            dev_acc = accuracy(dev_logits, y_dev)
-
-            # logging
+            # log 5 times per epoch
             if batch_idx % (len(batches) // 5) == 0:
+                dev_logits = model.forward(x_dev_scaled)
+                dev_loss = model.calculate_loss(dev_logits, y_dev)
+                dev_acc = accuracy(dev_logits, y_dev)
+
+                progress = epoch + batch_idx / len(batches)
+
                 train_loss_history.append(train_loss)
                 dev_loss_history.append(dev_loss)
-'''
-                print(f"Epoch: {epoch + 1:03d}/{num_epochs:03d}"
-                      f" | Batch {batch_idx:03d}/{len(batches):03d}"
-                      f" | Train Loss: {loss:.3f}")
+                x_axis.append(progress)
 
-                print(f"Dev Loss: {dev_loss:.4f} | Dev Accuracy: {dev_acc:.4f}")
-'''
+    plt.figure(figsize=(8, 5))
 
-plt.plot(train_loss_history, marker='o')
-plt.plot(dev_loss_history, marker='x')
+    plt.plot(x_axis, train_loss_history, marker='o', label="Training Loss")
+    plt.plot(x_axis, dev_loss_history, marker='x', label="Validation Loss")
 
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.title("Training vs Validation Loss")
-plt.legend()
-plt.grid(True)
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title(f"Training vs Validation Loss | BS: {batch_size} LR: {learning_rate}")
+    plt.legend()
+    plt.grid(True)
 
-plt.show()
+    plt.show()
 
-# formal testing
-test_output_logits = model.forward(x_test_scaled)
-loss_test = model.calculate_loss(test_output_logits, y_test)
-acc_test = accuracy(test_output_logits, y_test)
-print(f"Loss on testing dataset: {loss_test}")
-print(f"Accuracy on testing dataset: {acc_test}")
+    # formal testing
+    test_output_logits = model.forward(x_test_scaled)
+    loss_test = model.calculate_loss(test_output_logits, y_test)
+    acc_test = accuracy(test_output_logits, y_test)
+    print(f"Loss on testing dataset: {loss_test}")
+    print(f"Accuracy on testing dataset: {acc_test}")
