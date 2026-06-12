@@ -123,14 +123,14 @@ class AntonMNIST:
 
     # update parameters based on the gradients from backpropogation and the learning rate (lr)
     def update_parameters(self, learning_rate, beta=0.9):
-        self.vdw1 = beta * self.vdw1 + (1 - beta) * self.gradients["dw1"]
-        self.w1 += - learning_rate * self.vdw1
-        self.vdb1 = beta * self.vdb1 + (1 - beta) * self.gradients["db1"]
-        self.b1 += - learning_rate * self.vdb1
-        self.vdw2 = beta * self.vdw2 + (1 - beta) * self.gradients["dw2"]
-        self.w2 += - learning_rate * self.vdw2
-        self.vdb2 = beta * self.vdb2 + (1 - beta) * self.gradients["db2"]
-        self.b2 += - learning_rate * self.vdb2
+        self.vdw1 = beta * self.vdw1 + (1 - beta) * np.square(self.gradients["dw1"])
+        self.w1 += - learning_rate * (self.gradients["dw1"] / np.sqrt(self.vdw1) + 1e-8)
+        self.vdb1 = beta * self.vdb1 + (1 - beta) * np.square(self.gradients["db1"])
+        self.b1 += - learning_rate * (self.gradients["db1"] / np.sqrt(self.vdb1) + 1e-8)
+        self.vdw2 = beta * self.vdw2 + (1 - beta) * np.square(self.gradients["dw2"])
+        self.w2 += - learning_rate * (self.gradients["dw2"] / np.sqrt(self.vdw2) + 1e-8)
+        self.vdb2 = beta * self.vdb2 + (1 - beta) * np.square(self.gradients["db2"])
+        self.b2 += - learning_rate * (self.gradients["db2"] / np.sqrt(self.vdb2) + 1e-8)
 
 
 # create batches of size batch_size from x and y
