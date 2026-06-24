@@ -49,11 +49,21 @@ class AntonMNIST:
         self.w2 = rng1.standard_normal((10, def_hidden_units)) * np.sqrt(2 / def_hidden_units).astype(np.float32)
         self.b2 = np.zeros((10, 1)).astype(np.float32)
 
-        # adding velocities for momentum
+        # adding gradient squared terms
         self.vdw1 = np.zeros_like(self.w1)
         self.vdb1 = np.zeros_like(self.b1)
         self.vdw2 = np.zeros_like(self.w2)
         self.vdb2 = np.zeros_like(self.b2)
+
+        # adding momentum terms
+        self.mdw1 = np.zeros_like(self.w1)
+        self.mdb1 = np.zeros_like(self.b1)
+        self.mdw2 = np.zeros_like(self.w2)
+        self.mdb2 = np.zeros_like(self.b2)
+
+        # bias correction timestep counter
+        self.t = 0
+
 
         # store activations for backpropagation and gradients for update
         self.activations = {}
@@ -124,15 +134,38 @@ class AntonMNIST:
         self.gradients["db2"] = db2
 
     # update parameters based on the gradients from backpropagation and the learning rate (lr)
-    def update_parameters(self, learning_rate, beta=0.9):
-        self.vdw1 = beta * self.vdw1 + (1 - beta) * np.square(self.gradients["dw1"])
-        self.w1 += - learning_rate * self.gradients["dw1"] / (np.sqrt(self.vdw1) + 1e-8)
-        self.vdb1 = beta * self.vdb1 + (1 - beta) * np.square(self.gradients["db1"])
-        self.b1 += - learning_rate * self.gradients["db1"] / (np.sqrt(self.vdb1) + 1e-8)
-        self.vdw2 = beta * self.vdw2 + (1 - beta) * np.square(self.gradients["dw2"])
-        self.w2 += - learning_rate * self.gradients["dw2"] / (np.sqrt(self.vdw2) + 1e-8)
-        self.vdb2 = beta * self.vdb2 + (1 - beta) * np.square(self.gradients["db2"])
-        self.b2 += - learning_rate * self.gradients["db2"] / (np.sqrt(self.vdb2) + 1e-8)
+    # ADAM OPTIMIZER (Adaptive Moment Estimation)
+    def update_parameters(self, learning_rate, beta1=0.9, beta2=0.99, epsilon=1e-8):
+        self.t += 1
+
+        # RMSprop update
+        self.vdw1 = beta2 * self.vdw1 + (1 - beta2) * np.square(self.gradients["dw1"])
+        self.vdb1 = beta2 * self.vdb1 + (1 - beta2) * np.square(self.gradients["db1"])
+        self.vdw2 = beta2 * self.vdw2 + (1 - beta2) * np.square(self.gradients["dw2"])
+        self.vdb2 = beta2 * self.vdb2 + (1 - beta2) * np.square(self.gradients["db2"])
+
+        # momentum update
+        self.mdw1 = beta1 * self.mdw1 + (1 - beta1) * self.gradients["dw1"]
+        self.mdb1 = beta1 * self.mdb1 + (1 - beta1) * self.gradients["db1"]
+        self.mdw2 = beta1 * self.mdw2 + (1 - beta1) * self.gradients["dw2"]
+        self.mdb2 = beta1 * self.mdb2 + (1 - beta1) * self.gradients["db2"]
+
+        # bias correction
+        mdw1_c = self.mdw1 / (1 - beta1 ** self.t)
+        mdb1_c = self.mdb1 / (1 - beta1 ** self.t)
+        mdw2_c = self.mdw2 / (1 - beta1 ** self.t)
+        mdb2_c = self.mdb2 / (1 - beta1 ** self.t)
+
+        vdw1_c = self.vdw1 / (1 - beta1 ** self.t)
+        vdb1_c = self.vdb1 / (1 - beta1 ** self.t)
+        vdw2_c = self.vdw2 / (1 - beta1 ** self.t)
+        vdb2_c = self.vdb2 / (1 - beta1 ** self.t)
+
+        # update the weights
+        self.w1 -= learning_rate * mdw1_c / (np.sqrt(vdw1_c) + epsilon)
+        self.b1 -= learning_rate * mdb1_c / (np.sqrt(vdb1_c) + epsilon)
+        self.w2 -= learning_rate * mdw2_c / (np.sqrt(vdw2_c) + epsilon)
+        self.b2 -= learning_rate * mdb2_c / (np.sqrt(vdb2_c) + epsilon)
 
 
 # create batches of size batch_size from x and y
@@ -142,13 +175,13 @@ def get_batches(batch_size1, x, y):
 
     i = 0
     while i < m:
-        start = i
+        start_i = i
         end = i + batch_size1
 
         if end >= m:
-            batches1.append((x[:, start:], y[start:]))
+            batches1.append((x[:, start_i:], y[start_i:]))
         else:
-            batches1.append((x[:, start:end], y[start:end]))
+            batches1.append((x[:, start_i:end], y[start_i:end]))
 
         i += batch_size1
 
@@ -174,11 +207,14 @@ def train_model(
         x_train_,
         y_train_,
         x_dev_,
-        y_dev_
+        y_dev_,
+        lr_decay=0.95
 ):
     training_model = AntonMNIST(def_hidden_units=hu_)
 
-    for _ in range(ne):
+    for epoch in range(ne):
+        current_lr = lr_ * (lr_decay ** epoch)
+
         indices_ = np.arange(x_train_.shape[1])
         rng_ = np.random.default_rng(5)
         rng_.shuffle(indices_)
@@ -196,7 +232,7 @@ def train_model(
             training_model.forward(train_features)
 
             training_model.calculate_gradients(train_labels)
-            training_model.update_parameters(lr_)
+            training_model.update_parameters(current_lr)
 
     train_dev_logits = training_model.forward(x_dev_)
 
